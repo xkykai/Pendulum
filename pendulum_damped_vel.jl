@@ -12,7 +12,7 @@ end
 du₀ = [0.0]
 # u₀ = [π-0.1]
 u₀ = [0.5]
-tspan_train = (0.0, 1)
+tspan_train = (0.0, 1.0)
 p_train = [9.81, 0.1, 1]
 
 prob = SecondOrderODEProblem(damped_pendulum!, du₀, u₀, tspan_train, p_train)

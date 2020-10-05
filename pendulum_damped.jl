@@ -3,6 +3,7 @@ using DiffEqFlux, Optim
 using Flux
 using BlackBoxOptim
 using LaTeXStrings
+using Statistics
 
 function damped_pendulum!(ddθ, dθ, θ, p, t)
     g,L,b = p
@@ -12,7 +13,7 @@ end
 du₀ = [0.0]
 # u₀ = [π-0.1]
 u₀ = [0.5]
-tspan_train = (0.0, 1)
+tspan_train = (0.0, 0.5)
 p_train = [9.81, 0.1, 1]
 
 prob = SecondOrderODEProblem(damped_pendulum!, du₀, u₀, tspan_train, p_train)
@@ -25,11 +26,31 @@ plot(sol, vars = (1), label = "velocity")
 dataset_train = Array(sol)
 t_train = Array(sol.t)
 
+function feature_scaling(x, mean, std)
+    (x .- mean) ./ std
+end
+
 dataset_train_dθ = dataset_train[1,:]
+mean_train_dθ = mean(dataset_train_dθ)
+std_train_dθ = std(dataset_train_dθ)
+dataset_train_dθ_reg = feature_scaling(dataset_train_dθ, mean_train_dθ, std_train_dθ)
+
 dataset_train_θ = dataset_train[2,:]
+mean_train_θ = mean(dataset_train_θ)
+std_train_θ = std(dataset_train_θ)
+dataset_train_θ_reg = feature_scaling(dataset_train_θ, mean_train_θ, std_train_θ)
+
+function total_energy(dθ, θ, p)
+    g = p[1]
+    r = p[2]
+    0.5 .* r .^2 .* (dθ .^2) .+ g .* r .* (1 .- cos.(θ))
+end
+
+function energy_change(E)
+    E[2:end] - E[1:end-1]
+end
 
 model = FastChain(FastDense(1, 50, tanh), FastDense(50, 1))
-# model = FastChain(FastDense(1, 30, tanh), FastDense(30, 1))
 p_NN = initial_params(model)
 NN(du,u,p,t) = model(u,p)
 prob_NN = SecondOrderODEProblem{false}(NN, du₀, u₀, tspan_train, p_NN)
@@ -40,19 +61,17 @@ function predict(p)
     Array(solve(prob_NN, Tsit5(), p=p, saveat=t_train))
 end
 
-# function predict(p, prob, t)
-#     Array(solve(prob, Tsit5(), p=p, saveat=t))
-# end
-
 function loss_n_ode(p)
     pred = predict(p)
+    loss_dθ_reg = Flux.mse(dataset_train_dθ_reg, feature_scaling(pred[1,:], mean_train_dθ, std_train_dθ))
+    loss_θ_reg = Flux.mse(dataset_train_θ_reg, feature_scaling(pred[2,:], mean_train_θ, std_train_θ))
     # sum(abs2, dataset .- pred[1:2, :]), pred
-    Flux.mse(dataset_train, pred[1:2, :]), pred
+    mean(loss_θ_reg + loss_dθ_reg), pred
 end
 
 cb = function (p,l,pred)
     println(l)
-    l<0.5
+    false
 end
 
 cb_plot = function (p,l,pred)
@@ -70,59 +89,62 @@ cb_plot_vel = function (p,l,pred)
     display(fig)
     false
 end
-#
-# function train_NN(units, du₀, u₀, tspan)
-#     model = FastChain(FastDense(1, 50, tanh), FastDense(50, 1))
-#     p_NN = initial_params(model)
-#     NN(du,u,p,t) = model(u,p)
-#     prob_NN = SecondOrderODEProblem{false}(NN, du₀, u₀, tspan_train, p_NN)
-#
-#     println("Starting Gradient Descent")
-#     res = DiffEqFlux.sciml_train(loss_n_ode, p_NN, Descent(), maxiters=500)
-#     println("loss = $(Flux.mse(dataset_train, predict(res.minimizer)))")
-#     println("Starting ADAM")
-#     res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, ADAM(0.01), maxiters = 500)
-#     println("loss = $(Flux.mse(dataset_train, predict(res.minimizer)))")
-#     println("Starting BFGS")
-#     res = DiffEqFlux.sciml_train(loss_n_ode, res2.minimizer, BFGS())
-#     println("loss = $(Flux.mse(dataset_train, predict(res.minimizer)))")
-#     println("Starting LBFGS")
-#     res = DiffEqFlux.sciml_train(loss_n_ode, res3.minimizer, LBFGS())
-#     println("loss = $(Flux.mse(dataset_train, predict(res.minimizer)))")
-#     println("Starting NADAM")
-#     res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, NADAM(), maxiters = 5000)
-#     return res
-# end
-#
-# res = train_NN(50, du₀, u₀, tspan_train)
+
 
 println("Starting Gradient Descent")
 res = DiffEqFlux.sciml_train(loss_n_ode, p_NN, Descent(), cb = cb, maxiters=5000)
-println("loss = $(Flux.mse(dataset_train, predict(res.minimizer)))")
 println("Starting ADAM")
-res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, ADAM(0.01), maxiters = 5000)
-println("loss = $(Flux.mse(dataset_train, predict(res.minimizer)))")
+res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, ADAM(0.01), maxiters = 500)
 println("Starting BFGS")
 res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, BFGS(), cb = cb_plot)
-println("loss = $(Flux.mse(dataset_train, predict(res.minimizer)))")
 println("Starting LBFGS")
 res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, LBFGS(), cb = cb_plot)
-println("loss = $(Flux.mse(dataset_train, predict(res.minimizer)))")
-println("Starting NADAM")
-res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, NADAM(), maxiters = 5000)
-println("loss = $(Flux.mse(dataset_train, predict(res.minimizer)))")
+# println("Starting NADAM")
+# res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, NADAM(), maxiters = 5000)
 
 loss_n_ode(res.minimizer)
 
 prob_extrapolate = SecondOrderODEProblem{false}(NN, du₀, u₀, (0,10),res.minimizer)
-plot(solve(prob_NN, Tsit5(), p = res.minimizer, tspan = (0,10)))
+plot(solve(prob_NN, Tsit5(), p = res.minimizer, tspan = (0,1)))
 
 
 
 plot(solve(prob_NN, Tsit5(), p=res.minimizer), vars=(1), label = "Neural Network")
 # plot(solve(prob_extrapolate, Tsit5(), p=res5.minimizer), vars=(2), label = "Neural Network")
 plot!(solve(prob, Tsit5(), p=p_train), vars=(1), label = "Training Displacement")
-xlabel!("Time")
-ylabel!("Angular Velocity")
-title!("Full Data Training, loss = 0.122")
-savefig("train_damped_small_vel.pdf")
+
+
+tspan = (0.,1.)
+tspan_train = (0., 1.)
+
+sol = solve(prob, saveat=0.01, tspan = tspan)
+
+dataset_train = Array(sol)
+t_train = Array(sol.t)
+
+dataset_train_dθ = dataset_train[1,:]
+mean_train_dθ = mean(dataset_train_dθ)
+std_train_dθ = std(dataset_train_dθ)
+dataset_train_dθ_reg = feature_scaling(dataset_train_dθ, mean_train_dθ, std_train_dθ)
+
+dataset_train_θ = dataset_train[2,:]
+mean_train_θ = mean(dataset_train_θ)
+std_train_θ = std(dataset_train_θ)
+dataset_train_θ_reg = feature_scaling(dataset_train_θ, mean_train_θ, std_train_θ)
+
+plot(sol, vars = (2), label = "displacement")
+plot!(solve(prob_NN, Tsit5(), p = res.minimizer, tspan = (0,1), saveat=t_train), vars = (2))
+plot(sol, vars = (1), label = "velocity")
+plot!(solve(prob_NN, Tsit5(), p = res.minimizer, tspan = (0,1)), vars = (1))
+
+
+prob_NN = SecondOrderODEProblem{false}(NN, du₀, u₀, tspan_train, res.minimizer)
+
+println("Starting Gradient Descent")
+res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, Descent(), cb = cb, maxiters=5000)
+println("Starting ADAM")
+res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, ADAM(0.01), maxiters = 5000)
+println("Starting BFGS")
+res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, BFGS(), cb = cb_plot)
+println("Starting LBFGS")
+res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, LBFGS(), cb = cb_plot)
