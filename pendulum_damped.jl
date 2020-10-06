@@ -63,10 +63,18 @@ end
 
 function loss_n_ode(p)
     pred = predict(p)
+    E = total_energy(pred[1,:], pred[2,:], p_train)
+    ΔE = energy_change(E)
+    E_penalty = 0
+    for i in 1:length(ΔE)
+        if (ΔE[i] > 0)
+            E_penalty += ΔE[i] * 100
+        end
+    end
     loss_dθ_reg = Flux.mse(dataset_train_dθ_reg, feature_scaling(pred[1,:], mean_train_dθ, std_train_dθ))
     loss_θ_reg = Flux.mse(dataset_train_θ_reg, feature_scaling(pred[2,:], mean_train_θ, std_train_θ))
     # sum(abs2, dataset .- pred[1:2, :]), pred
-    mean(loss_θ_reg + loss_dθ_reg), pred
+    mean(loss_θ_reg + loss_dθ_reg) + E_penalty, pred
 end
 
 cb = function (p,l,pred)
@@ -94,7 +102,7 @@ end
 println("Starting Gradient Descent")
 res = DiffEqFlux.sciml_train(loss_n_ode, p_NN, Descent(), cb = cb, maxiters=5000)
 println("Starting ADAM")
-res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, ADAM(0.01), maxiters = 500)
+res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, ADAM(0.01), maxiters = 5000)
 println("Starting BFGS")
 res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, BFGS(), cb = cb_plot)
 println("Starting LBFGS")
@@ -141,10 +149,15 @@ plot!(solve(prob_NN, Tsit5(), p = res.minimizer, tspan = (0,1)), vars = (1))
 prob_NN = SecondOrderODEProblem{false}(NN, du₀, u₀, tspan_train, res.minimizer)
 
 println("Starting Gradient Descent")
-res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, Descent(), cb = cb, maxiters=5000)
+res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, Descent(), maxiters=5000)
 println("Starting ADAM")
 res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, ADAM(0.01), maxiters = 5000)
 println("Starting BFGS")
 res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, BFGS(), cb = cb_plot)
 println("Starting LBFGS")
 res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, LBFGS(), cb = cb_plot)
+println("Starting NADAM")
+res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, NADAM(), maxiters = 5000)
+
+
+loss_n_ode(res.minimizer)
