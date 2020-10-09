@@ -50,10 +50,11 @@ function energy_change(E)
     E[2:end] - E[1:end-1]
 end
 
-model = FastChain(FastDense(1, 50, tanh), FastDense(50, 1))
+model = FastChain(FastDense(1, 50, relu), FastDense(50, 1))
 p_NN = initial_params(model)
 NN(du,u,p,t) = model(u,p)
-prob_NN = SecondOrderODEProblem{false}(NN, du₀, u₀, tspan_train, p_NN)
+prob_NN = ODEProblem(NN, du₀, u₀, tspan_train, p_NN)
+# prob_NN = SecondOrderODEProblem{false}(NN, du₀, u₀, tspan_train, p_NN)
 
 plot(solve(prob_NN, Tsit5(), p=p_NN, saveat=t_train))
 
@@ -100,7 +101,7 @@ end
 
 
 println("Starting Gradient Descent")
-res = DiffEqFlux.sciml_train(loss_n_ode, p_NN, Descent(), cb = cb, maxiters=5000)
+res = DiffEqFlux.sciml_train(loss_n_ode, p_NN, Descent(), maxiters=5000)
 println("Starting ADAM")
 res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, ADAM(0.01), maxiters = 5000)
 println("Starting BFGS")
@@ -119,11 +120,11 @@ plot(solve(prob_NN, Tsit5(), p = res.minimizer, tspan = (0,1)))
 
 plot(solve(prob_NN, Tsit5(), p=res.minimizer), vars=(1), label = "Neural Network")
 # plot(solve(prob_extrapolate, Tsit5(), p=res5.minimizer), vars=(2), label = "Neural Network")
-plot!(solve(prob, Tsit5(), p=p_train), vars=(1), label = "Training Displacement")
+plot!(solve(prob, Tsit5(), p=p_train), vars=(1), label = "Training Velocity")
 
 
-tspan = (0.,1.)
-tspan_train = (0., 1.)
+tspan = (0.,2.)
+tspan_train = (0., 2.)
 
 sol = solve(prob, saveat=0.01, tspan = tspan)
 
@@ -141,9 +142,9 @@ std_train_θ = std(dataset_train_θ)
 dataset_train_θ_reg = feature_scaling(dataset_train_θ, mean_train_θ, std_train_θ)
 
 plot(sol, vars = (2), label = "displacement")
-plot!(solve(prob_NN, Tsit5(), p = res.minimizer, tspan = (0,1), saveat=t_train), vars = (2))
+plot!(solve(prob_NN, Tsit5(), p = res.minimizer, tspan = (0,2), saveat=t_train), vars = (2))
 plot(sol, vars = (1), label = "velocity")
-plot!(solve(prob_NN, Tsit5(), p = res.minimizer, tspan = (0,1)), vars = (1))
+plot!(solve(prob_NN, Tsit5(), p = res.minimizer, tspan = (0,2)), vars = (1))
 
 
 prob_NN = SecondOrderODEProblem{false}(NN, du₀, u₀, tspan_train, res.minimizer)
@@ -156,8 +157,8 @@ println("Starting BFGS")
 res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, BFGS(), cb = cb_plot)
 println("Starting LBFGS")
 res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, LBFGS(), cb = cb_plot)
-println("Starting NADAM")
-res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, NADAM(), maxiters = 5000)
+# println("Starting NADAM")
+# res = DiffEqFlux.sciml_train(loss_n_ode, res.minimizer, NADAM(), maxiters = 5000)
 
 
 loss_n_ode(res.minimizer)
